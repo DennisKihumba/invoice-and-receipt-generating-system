@@ -35,10 +35,10 @@ export default function Clients({ org }) {
       {err && <p className="note">{err}</p>}
       {clients.length === 0
         ? <p className="muted">No clients yet. Add your first client above to start invoicing.</p>
-        : <table>
+        : <table className="stack">
             <thead><tr><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
             <tbody>{clients.map(c => (
-              <tr key={c.id}><td>{c.name}</td><td>{c.email}</td><td>{c.phone}</td></tr>
+              <tr key={c.id}><td data-label="Name"><strong>{c.name}</strong></td><td data-label="Email">{c.email}</td><td data-label="Phone">{c.phone}</td></tr>
             ))}</tbody>
           </table>}
     </section>

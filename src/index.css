@@ -44,3 +44,40 @@ th, td { text-align: left; padding: .65rem .85rem; border-bottom: 1px solid var(
 th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 tr:last-child td { border-bottom: 0; }
 @media (max-width: 40rem) { .tabs { margin-left: 0; width: 100%; } }
+
+/* ── Progress banner and action buttons ── */
+.status { display: flex; align-items: center; gap: .6rem; margin: 0 0 1rem; padding: .65rem .9rem;
+  border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.spin { flex: none; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.actions { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
+button.ghost:disabled { opacity: .55; }
+input, select, textarea { min-width: 0; }
+img { max-width: 100%; }
+body { overflow-x: hidden; }
+
+/* ── Phones: no sideways scrolling, tables become cards, big tap targets ── */
+@media (max-width: 40rem) {
+  .shell { padding: 0 .75rem 2rem; }
+  .bar { gap: .6rem; }
+  .bar-name { order: 2; min-width: 0; flex: 1; }
+  .bar > button.ghost { order: 3; margin-left: auto; }
+  .tabs { order: 4; width: 100%; margin-left: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: .25rem; }
+  .tabs button { padding: .6rem .2rem; font-size: .9rem; }
+  .card { padding: 1.1rem; }
+  .narrow { margin: 1.5rem auto; }
+  input, select, textarea { font-size: 16px; }   /* stops iPhone zooming into fields */
+  button { min-height: 44px; }
+
+  table.stack, table.stack tbody { display: block; border: 0; background: transparent; }
+  table.stack thead { display: none; }
+  table.stack tr { display: block; margin-bottom: .75rem; padding: .4rem .85rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  table.stack td { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem 0; border: 0; text-align: right; }
+  table.stack td::before { content: attr(data-label); flex: none; color: var(--muted); font-size: .85rem; text-align: left; }
+  table.stack td.actcell { display: block; margin-top: .3rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+  table.stack td.actcell::before { content: none; }
+  .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); }
+}

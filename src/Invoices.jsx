@@ -13,6 +13,7 @@ export default function Invoices({ org }) {
   const [clients, setClients] = useState([])
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
+  const [working, setWorking] = useState('')   // which row action is running, e.g. "<id>:email"
 
   const load = useCallback(async () => {
     const [inv, cl] = await Promise.all([
@@ -32,7 +33,14 @@ export default function Invoices({ org }) {
     if (error) setErr(error.message); else load()
   }
 
-  const run = fn => { setErr(''); setNotice(''); return fn().then(r => { if (typeof r === 'string') setNotice(r); return load() }).catch(e => setErr(e.message)) }
+  const run = (key, fn, text) => {
+    if (working) return
+    setErr(''); setNotice(text); setWorking(key)
+    return fn()
+      .then(r => { setNotice(typeof r === 'string' ? r : ''); return load() })
+      .catch(e => { setNotice(''); setErr(e.message) })
+      .finally(() => setWorking(''))
+  }
 
   if (view === 'new')
     return <Builder org={org} clients={clients} onCancel={() => setView('list')}
@@ -47,22 +55,29 @@ export default function Invoices({ org }) {
       </div>
       {clients.length === 0 && <p className="muted">Add a client first, then you can create an invoice.</p>}
       {err && <p className="note">{err}</p>}
-      {notice && <p className="muted">{notice}</p>}
+      {notice && <p className="status" role="status">{working && <span className="spin" />}{notice}</p>}
       {invoices.length > 0 && (
-        <table>
+        <table className="stack">
           <thead><tr><th>Number</th><th>Client</th><th>Issued</th><th>Status</th><th>Total</th><th>Paid</th><th></th></tr></thead>
-          <tbody>{invoices.map(i => (
-            <tr key={i.id}>
-              <td>{i.number}</td><td>{i.clients?.name}</td><td>{i.issue_date}</td>
-              <td>{label[i.status]}</td><td>{money(i.total)}</td><td>{money(i.amount_paid)}</td>
-              <td style={{ whiteSpace: 'nowrap' }}>
-                <button className="ghost" onClick={() => run(() => downloadInvoice(org, i.id))}>PDF</button>{' '}
-                <button className="ghost" onClick={() => run(() => whatsappInvoice(org, i.id))}>WhatsApp</button>{' '}
-                <button className="ghost" onClick={() => run(() => emailInvoice(org, i.id))}>Email</button>{' '}
-                {i.status === 'draft' && <button className="ghost" onClick={() => markSent(i.id)}>Mark as sent</button>}
-              </td>
-            </tr>
-          ))}</tbody>
+          <tbody>{invoices.map(i => {
+            const on = a => working === i.id + ':' + a
+            return (
+              <tr key={i.id}>
+                <td data-label="Invoice"><strong>{i.number}</strong></td>
+                <td data-label="Client">{i.clients?.name}</td>
+                <td data-label="Issued">{i.issue_date}</td>
+                <td data-label="Status">{label[i.status]}</td>
+                <td data-label="Total">{money(i.total)}</td>
+                <td data-label="Paid">{money(i.amount_paid)}</td>
+                <td className="actcell"><div className="actions">
+                  <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':pdf', () => downloadInvoice(org, i.id), 'Preparing the PDF…')}>{on('pdf') ? 'Preparing…' : 'PDF'}</button>
+                  <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':wa', () => whatsappInvoice(org, i.id), 'Preparing the invoice for WhatsApp…')}>{on('wa') ? 'Opening…' : 'WhatsApp'}</button>
+                  <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':email', () => emailInvoice(org, i.id), 'Sending the invoice by email. Please wait…')}>{on('email') ? 'Sending…' : 'Email'}</button>
+                  {i.status === 'draft' && <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':sent', async () => { const { error } = await supabase.from('invoices').update({ status: 'sent' }).eq('id', i.id); if (error) throw error }, 'Updating…')}>{on('sent') ? 'Updating…' : 'Mark as sent'}</button>}
+                </div></td>
+              </tr>
+            )
+          })}</tbody>
         </table>
       )}
     </section>

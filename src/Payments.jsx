@@ -17,6 +17,7 @@ export default function Payments({ org }) {
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
   const [emailIt, setEmailIt] = useState(true)
+  const [working, setWorking] = useState('')   // which receipt action is running
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -41,26 +42,34 @@ export default function Payments({ org }) {
   // Default the amount to the full balance whenever the invoice changes
   useEffect(() => { setAmount(selected ? String(balance) : '') }, [invoiceId, selected?.amount_paid])
 
-  const run = fn => { setErr(''); setNotice(''); return fn().then(r => { if (typeof r === 'string') setNotice(r) }).catch(e => setErr(e.message)) }
+  const run = (key, fn, text) => {
+    if (working) return
+    setErr(''); setNotice(text); setWorking(key)
+    return fn()
+      .then(r => { setNotice(typeof r === 'string' ? r : ''); })
+      .catch(e => { setNotice(''); setErr(e.message) })
+      .finally(() => setWorking(''))
+  }
 
   async function record(e) {
     e.preventDefault()
     setErr(''); setNotice('')
     if (Number(amount) > balance) return setErr(`That is more than the balance of ${money(balance)}.`)
-    setBusy(true)
+    setBusy(true); setNotice('Saving payment…')
     const { data: pay, error } = await supabase.from('payments').insert({
       org_id: org.id, invoice_id: invoiceId, amount: Number(amount), method,
       reference: reference.trim() || null, paid_at: date,
     }).select('id').single()
-    setBusy(false)
-    if (error) return setErr(error.code === '23505' ? 'That reference has already been recorded.' : error.message)
+    if (error) { setBusy(false); setNotice(''); return setErr(error.code === '23505' ? 'That reference has already been recorded.' : error.message) }
     setReference('')
+    setNotice(emailIt ? 'Payment saved. Sending the receipt…' : 'Payment recorded.')
     if (emailIt) {
       try {
         const { data: rc } = await supabase.from('receipts').select('id').eq('payment_id', pay.id).single()
         setNotice(await emailReceipt(org, rc.id))
-      } catch (e) { setErr('Payment recorded, but the receipt email failed: ' + e.message) }
+      } catch (e) { setNotice('Payment recorded.'); setErr('The receipt email failed: ' + e.message + ' You can resend it with the Email button below.') }
     }
+    setBusy(false)
     load()
   }
 
@@ -100,32 +109,37 @@ export default function Payments({ org }) {
                    checked={emailIt} onChange={e => setEmailIt(e.target.checked)} />
             Email the receipt to the client
           </label>
-          <button disabled={busy}>Record payment and issue receipt</button>
+          <button disabled={busy || !!working}>{busy ? 'Working…' : 'Record payment and issue receipt'}</button>
         </form>
       )}
       {open.length === 0 && err && <p className="note">{err}</p>}
 
-      {notice && <p className="muted">{notice}</p>}
+      {notice && <p className="status" role="status">{(working || busy) && <span className="spin" />}{notice}</p>}
 
       <h2 style={{ marginTop: '2rem' }}>Receipts</h2>
       {receipts.length === 0 ? (
         <p className="muted">Receipts appear here as soon as you record a payment.</p>
       ) : (
-        <table>
+        <table className="stack">
           <thead><tr><th>Receipt</th><th>Invoice</th><th>Client</th><th>Paid</th><th>Method</th><th>Balance left</th><th></th></tr></thead>
-          <tbody>{receipts.map(r => (
-            <tr key={r.id}>
-              <td>{r.number}</td><td>{r.invoices?.number}</td><td>{r.invoices?.clients?.name}</td>
-              <td>{money(r.amount)}</td>
-              <td>{methods[r.payments?.method]}{r.payments?.reference ? ` · ${r.payments.reference}` : ''}</td>
-              <td>{r.paid_in_full ? 'Paid in full' : money(r.balance_after)}</td>
-              <td style={{ whiteSpace: 'nowrap' }}>
-                <button className="ghost" onClick={() => run(() => downloadReceipt(org, r.id))}>PDF</button>{' '}
-                <button className="ghost" onClick={() => run(() => whatsappReceipt(org, r.id))}>WhatsApp</button>{' '}
-                <button className="ghost" onClick={() => run(() => emailReceipt(org, r.id))}>Email</button>
-              </td>
-            </tr>
-          ))}</tbody>
+          <tbody>{receipts.map(r => {
+            const on = a => working === r.id + ':' + a
+            return (
+              <tr key={r.id}>
+                <td data-label="Receipt"><strong>{r.number}</strong></td>
+                <td data-label="Invoice">{r.invoices?.number}</td>
+                <td data-label="Client">{r.invoices?.clients?.name}</td>
+                <td data-label="Paid">{money(r.amount)}</td>
+                <td data-label="Method">{methods[r.payments?.method]}{r.payments?.reference ? ` · ${r.payments.reference}` : ''}</td>
+                <td data-label="Balance left">{r.paid_in_full ? 'Paid in full' : money(r.balance_after)}</td>
+                <td className="actcell"><div className="actions">
+                  <button className="ghost" disabled={busy || !!working} onClick={() => run(r.id + ':pdf', () => downloadReceipt(org, r.id), 'Preparing the PDF…')}>{on('pdf') ? 'Preparing…' : 'PDF'}</button>
+                  <button className="ghost" disabled={busy || !!working} onClick={() => run(r.id + ':wa', () => whatsappReceipt(org, r.id), 'Preparing the receipt for WhatsApp…')}>{on('wa') ? 'Opening…' : 'WhatsApp'}</button>
+                  <button className="ghost" disabled={busy || !!working} onClick={() => run(r.id + ':email', () => emailReceipt(org, r.id), 'Sending the receipt by email. Please wait…')}>{on('email') ? 'Sending…' : 'Email'}</button>
+                </div></td>
+              </tr>
+            )
+          })}</tbody>
         </table>
       )}
     </section>

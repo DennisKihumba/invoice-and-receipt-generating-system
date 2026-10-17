@@ -154,6 +154,7 @@ export const whatsappReceipt = (org, id) => openWhatsApp(async () => {
 async function sendEmail(kind, id) {
   const { data, error } = await supabase.functions.invoke('send-document', { body: { kind, id } })
   if (error) throw new Error(error.message)
+  if (data?.duplicate) return data.message
   if (data?.error) throw new Error(data.error)
   return `Emailed to ${data.sentTo}`
 }
