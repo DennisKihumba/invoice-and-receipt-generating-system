@@ -1,6 +1,12 @@
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
 import { supabase } from './supabase'
+import { friendly } from './errors'
+
+// The PDF libraries are large, so they download only when a PDF is first needed,
+// not when the app opens.
+async function pdfLibs() {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
+  return { jsPDF, autoTable }
+}
 
 const TEAL = [15, 118, 110], INK = [20, 50, 58], MUTED = [93, 114, 121]
 const fmt = n => 'KES ' + Number(n ?? 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -63,6 +69,7 @@ async function buildInvoice(orgId, id) {
   const o = await orgFull(orgId)
   const { data: inv, error } = await supabase.from('invoices').select('*, clients(*), invoice_items(*)').eq('id', id).single()
   if (error) throw error
+  const { jsPDF, autoTable } = await pdfLibs()
   const doc = new jsPDF(), W = doc.internal.pageSize.getWidth()
   let y = await letterhead(doc, o, 'INVOICE', inv.number)
   const yEnd = party(doc, 'Bill to', inv.clients, y)
@@ -88,6 +95,16 @@ async function buildInvoice(orgId, id) {
     doc.setFont('helvetica', 'normal')
     const wrapped = doc.splitTextToSize(text, W - 28); doc.text(wrapped, 14, y + 5); y += 9 + wrapped.length * 4
   }
+  if (inv.status === 'void') {
+    try { doc.setGState(new doc.GState({ opacity: 0.18 })) } catch { /* no transparency: stamp still shows */ }
+    doc.setTextColor(185, 28, 28); doc.setFont('helvetica', 'bold'); doc.setFontSize(96)
+    doc.text('VOID', W / 2, 160, { align: 'center', angle: 35 })
+    try { doc.setGState(new doc.GState({ opacity: 1 })) } catch { /* ignore */ }
+    if (inv.void_reason) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...MUTED)
+      doc.text(`Voided: ${inv.void_reason}`, 14, 285)
+    }
+  }
   return { doc, inv, o }
 }
 
@@ -96,6 +113,7 @@ async function buildReceipt(orgId, id) {
   const { data: r, error } = await supabase.from('receipts')
     .select('*, payments(*), invoices(number, total, clients(*))').eq('id', id).single()
   if (error) throw error
+  const { jsPDF, autoTable } = await pdfLibs()
   const doc = new jsPDF(), W = doc.internal.pageSize.getWidth()
   let y = await letterhead(doc, o, 'RECEIPT', r.number)
   y = party(doc, 'Received from', r.invoices.clients, y)
@@ -138,6 +156,7 @@ export async function downloadReceipt(org, id) { const { doc, r } = await buildR
 
 export const whatsappInvoice = (org, id) => openWhatsApp(async () => {
   const { doc, inv, o } = await buildInvoice(org.id, id)
+  if (inv.status === 'void') throw new Error('This invoice has been voided and cannot be sent.')
   const url = await publish(org.id, 'invoices', id, doc)
   if (inv.status === 'draft') await supabase.from('invoices').update({ status: 'sent' }).eq('id', id)
   return waLink(inv.clients.phone, `Hello ${inv.clients.name}, here is invoice ${inv.number} from ${o.name}: ${url}`)
@@ -153,7 +172,7 @@ export const whatsappReceipt = (org, id) => openWhatsApp(async () => {
 // ── Email (sent by the send-document Edge Function) ──
 async function sendEmail(kind, id) {
   const { data, error } = await supabase.functions.invoke('send-document', { body: { kind, id } })
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(friendly(error))
   if (data?.duplicate) return data.message
   if (data?.error) throw new Error(data.error)
   return `Emailed to ${data.sentTo}`
@@ -161,6 +180,7 @@ async function sendEmail(kind, id) {
 
 export async function emailInvoice(org, id) {
   const { doc, inv } = await buildInvoice(org.id, id)
+  if (inv.status === 'void') throw new Error('This invoice has been voided and cannot be sent.')
   await publish(org.id, 'invoices', id, doc)
   if (inv.status === 'draft') await supabase.from('invoices').update({ status: 'sent' }).eq('id', id)
   return sendEmail('invoice', id)
@@ -171,4 +191,13 @@ export async function emailReceipt(org, id) {
   const url = await publish(org.id, 'receipts', id, doc)
   await supabase.from('receipts').update({ pdf_url: url }).eq('id', id)
   return sendEmail('receipt', id)
+}
+
+// Called after login: downloads the PDF tools quietly so the first PDF/WhatsApp/Email is instant
+export const warmPdf = () => { pdfLibs().catch(() => {}) }
+
+// Rebuilds and re-publishes an invoice's PDF (used after voiding so shared links show VOID)
+export async function refreshInvoicePdf(org, id) {
+  const { doc } = await buildInvoice(org.id, id)
+  await publish(org.id, 'invoices', id, doc)
 }

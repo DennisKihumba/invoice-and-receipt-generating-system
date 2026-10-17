@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
+import { friendly } from './errors'
 
 export default function Settings({ org, onSaved }) {
   const [f, setF] = useState(null)
@@ -9,7 +10,7 @@ export default function Settings({ org, onSaved }) {
 
   useEffect(() => {
     supabase.from('organizations').select('*').eq('id', org.id).single()
-      .then(({ data, error }) => (error ? setErr(error.message) : setF(data)))
+      .then(({ data, error }) => (error ? setErr(friendly(error)) : setF(data)))
   }, [org.id])
 
   if (!f) return <p className="muted">{err || 'Loading…'}</p>
@@ -17,14 +18,15 @@ export default function Settings({ org, onSaved }) {
 
   async function save(e) {
     e.preventDefault(); setBusy(true); setErr(''); setMsg('')
-    const { error } = await supabase.from('organizations').update({
+    const { data: saved, error } = await supabase.from('organizations').update({
       name: f.name, address: f.address || null, phone: f.phone || null, email: f.email || null,
       kra_pin: f.kra_pin || null, vat_rate: Number(f.vat_rate),
       invoice_prefix: f.invoice_prefix.trim().toUpperCase(), receipt_prefix: f.receipt_prefix.trim().toUpperCase(),
       payment_instructions: f.payment_instructions || null,
-    }).eq('id', org.id)
+    }).eq('id', org.id).select('id')
     setBusy(false)
-    if (error) return setErr(error.message)
+    if (error) return setErr(friendly(error))
+    if (!saved?.length) return setErr('You do not have permission to change company settings.')
     setMsg('Saved.'); onSaved()
   }
 
@@ -36,18 +38,20 @@ export default function Settings({ org, onSaved }) {
     if (file.size > 2 * 1024 * 1024) return setErr('The logo must be under 2 MB.')
     setBusy(true); setErr(''); setMsg('')
     const path = `${org.id}/logo.${file.type === 'image/png' ? 'png' : 'jpg'}`
-    const up = await supabase.storage.from('logos').upload(path, file, { upsert: true, contentType: file.type })
-    if (up.error) { setBusy(false); return setErr(up.error.message) }
+    const up = await supabase.storage.from('logos').upload(path, await shrink(file), { upsert: true, contentType: file.type })
+    if (up.error) { setBusy(false); return setErr(friendly(up.error)) }
     const url = supabase.storage.from('logos').getPublicUrl(path).data.publicUrl + `?v=${Date.now()}`
-    const { error } = await supabase.from('organizations').update({ logo_url: url }).eq('id', org.id)
+    const { data: done, error } = await supabase.from('organizations').update({ logo_url: url }).eq('id', org.id).select('id')
     setBusy(false)
-    if (error) return setErr(error.message)
+    if (error) return setErr(friendly(error))
+    if (!done?.length) return setErr('You do not have permission to change the logo.')
     setF({ ...f, logo_url: url }); setMsg('Logo updated.'); onSaved()
   }
 
   async function removeLogo() {
-    const { error } = await supabase.from('organizations').update({ logo_url: null }).eq('id', org.id)
-    if (error) return setErr(error.message)
+    const { data: done, error } = await supabase.from('organizations').update({ logo_url: null }).eq('id', org.id).select('id')
+    if (error) return setErr(friendly(error))
+    if (!done?.length) return setErr('You do not have permission to change the logo.')
     setF({ ...f, logo_url: null }); onSaved()
   }
 
@@ -90,4 +94,16 @@ export default function Settings({ org, onSaved }) {
       </form>
     </section>
   )
+}
+
+// Logos are shown at about 40px in the app and 20mm on PDFs, so a huge file only slows
+// every page load. Scale it down to at most 400px before uploading.
+async function shrink(file, max = 400) {
+  const img = await createImageBitmap(file)
+  const scale = Math.min(1, max / Math.max(img.width, img.height))
+  const c = document.createElement('canvas')
+  c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale)
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+  const blob = await new Promise(res => c.toBlob(res, file.type, 0.9))
+  return blob || file
 }

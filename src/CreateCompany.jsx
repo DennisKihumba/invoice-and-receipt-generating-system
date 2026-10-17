@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from './supabase'
+import { friendly } from './errors'
 
 export default function CreateCompany({ onCreated }) {
   const [f, setF] = useState({ name: '', inv: 'INV', rct: 'RCT', phone: '', email: '' })
@@ -17,7 +18,7 @@ export default function CreateCompany({ onCreated }) {
       p_phone: f.phone || null,
       p_email: f.email || null,
     })
-    if (error) { setErr(error.message); setBusy(false) } else onCreated()
+    if (error) { setErr(friendly(error)); setBusy(false) } else onCreated()
   }
 
   return (

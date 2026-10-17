@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from './supabase'
-import { downloadInvoice, whatsappInvoice, emailInvoice } from './pdf'
+import { friendly } from './errors'
+import { useCached, forget } from './cache'
+import { downloadInvoice, whatsappInvoice, emailInvoice, refreshInvoicePdf } from './pdf'
 
 const money = n => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(n ?? 0)
 const today = () => new Date().toISOString().slice(0, 10)
@@ -9,28 +11,41 @@ const label = { draft: 'Draft', sent: 'Sent', partial: 'Partly paid', paid: 'Pai
 
 export default function Invoices({ org }) {
   const [view, setView] = useState('list')
-  const [invoices, setInvoices] = useState([])
-  const [clients, setClients] = useState([])
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
+  const [voiding, setVoiding] = useState(null)   // the invoice waiting for void confirmation
+  const [reason, setReason] = useState('')
   const [working, setWorking] = useState('')   // which row action is running, e.g. "<id>:email"
 
-  const load = useCallback(async () => {
-    const [inv, cl] = await Promise.all([
+  const { data, error: loadErr, refresh: load } = useCached(`${org.id}:invoices`, async () => {
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+    const [inv, cl, pay] = await Promise.all([
       supabase.from('invoices')
         .select('id, number, status, issue_date, due_date, total, amount_paid, clients(name, phone)')
         .eq('org_id', org.id).order('created_at', { ascending: false }),
       supabase.from('clients').select('id, name').eq('org_id', org.id).order('name'),
+      supabase.from('payments').select('amount').eq('org_id', org.id).gte('paid_at', monthStart),
     ])
-    if (inv.error || cl.error) return setErr((inv.error || cl.error).message)
-    setInvoices(inv.data); setClients(cl.data)
-  }, [org.id])
+    if (inv.error || cl.error || pay.error) throw (inv.error || cl.error || pay.error)
+    return { invoices: inv.data, clients: cl.data, collected: pay.data.reduce((s, p) => s + Number(p.amount), 0) }
+  })
+  const ready = data !== undefined
+  const invoices = data?.invoices ?? []
+  const clients = data?.clients ?? []
 
-  useEffect(() => { load() }, [load])
+  // Totals ignore void invoices; drafts are not money owed yet
+  const todayStr = new Date().toLocaleDateString('en-CA')   // YYYY-MM-DD in your own time zone
+  const owing = i => Number(i.total) - Number(i.amount_paid)
+  const isOpen = i => ['sent', 'partial'].includes(i.status)
+  const isOverdue = i => isOpen(i) && i.due_date && i.due_date < todayStr
+  const outstanding = invoices.filter(isOpen).reduce((s, i) => s + owing(i), 0)
+  const overdueList = invoices.filter(isOverdue)
+  const overdue = overdueList.reduce((s, i) => s + owing(i), 0)
+  const drafts = invoices.filter(i => i.status === 'draft').length
 
   async function markSent(id) {
     const { error } = await supabase.from('invoices').update({ status: 'sent' }).eq('id', id)
-    if (error) setErr(error.message); else load()
+    if (error) setErr(friendly(error)); else load()
   }
 
   const run = (key, fn, text) => {
@@ -38,8 +53,22 @@ export default function Invoices({ org }) {
     setErr(''); setNotice(text); setWorking(key)
     return fn()
       .then(r => { setNotice(typeof r === 'string' ? r : ''); return load() })
-      .catch(e => { setNotice(''); setErr(e.message) })
+      .catch(e => { setNotice(''); setErr(friendly(e)) })
       .finally(() => setWorking(''))
+  }
+
+  const confirmVoid = () => {
+    const v = voiding
+    return run(v.id + ':void', async () => {
+      const { error } = await supabase.from('invoices')
+        .update({ status: 'void', void_reason: reason.trim() || null }).eq('id', v.id)
+      if (error) throw error
+      forget(`${org.id}:payments`)
+      // Re-publish the PDF so any link already sent to the client now shows VOID
+      if (v.status !== 'draft') await refreshInvoicePdf(org, v.id).catch(() => {})
+      setVoiding(null); setReason('')
+      return `Invoice ${v.number} has been voided.`
+    }, 'Voiding the invoice…')
   }
 
   if (view === 'new')
@@ -51,10 +80,34 @@ export default function Invoices({ org }) {
       <div className="row" style={{ alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0 }}>Invoices</h2>
         <button style={{ flex: '0 0 auto', marginLeft: 'auto' }} onClick={() => setView('new')}
-                disabled={clients.length === 0}>New invoice</button>
+                disabled={!ready || clients.length === 0}>New invoice</button>
       </div>
-      {clients.length === 0 && <p className="muted">Add a client first, then you can create an invoice.</p>}
-      {err && <p className="note">{err}</p>}
+      {ready && clients.length === 0 && <p className="muted">Add a client first, then you can create an invoice.</p>}
+      {ready && (
+        <div className="stats">
+          <div className="stat"><span>Outstanding</span><strong>{money(outstanding)}</strong></div>
+          <div className={'stat' + (overdueList.length ? ' warn' : '')}>
+            <span>Overdue{overdueList.length ? ` (${overdueList.length})` : ''}</span><strong>{money(overdue)}</strong>
+          </div>
+          <div className="stat"><span>Collected this month</span><strong>{money(data.collected)}</strong></div>
+          <div className="stat"><span>Drafts</span><strong>{drafts}</strong></div>
+        </div>
+      )}
+      {voiding && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <strong>Void invoice {voiding.number}?</strong>
+          <p className="muted">It stays in your records marked as void, its number is not reused, and it can no longer be paid. This cannot be undone.</p>
+          <label>Reason (optional)
+            <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong amount, issued to the wrong client" />
+          </label>
+          <div className="row">
+            <button disabled={!!working} onClick={confirmVoid}>{working ? 'Voiding…' : 'Yes, void it'}</button>
+            <button className="ghost" disabled={!!working} onClick={() => { setVoiding(null); setReason('') }}>Keep invoice</button>
+          </div>
+        </div>
+      )}
+      {(err || loadErr) && <p className="note">{err || loadErr}</p>}
+      {!ready && !loadErr && <p className="muted">Loading…</p>}
       {notice && <p className="status" role="status">{working && <span className="spin" />}{notice}</p>}
       {invoices.length > 0 && (
         <table className="stack">
@@ -62,18 +115,19 @@ export default function Invoices({ org }) {
           <tbody>{invoices.map(i => {
             const on = a => working === i.id + ':' + a
             return (
-              <tr key={i.id}>
+              <tr key={i.id} className={i.status === 'void' ? 'is-void' : undefined}>
                 <td data-label="Invoice"><strong>{i.number}</strong></td>
                 <td data-label="Client">{i.clients?.name}</td>
                 <td data-label="Issued">{i.issue_date}</td>
-                <td data-label="Status">{label[i.status]}</td>
+                <td data-label="Status" className={isOverdue(i) ? 'warn-text' : undefined}>{isOverdue(i) ? 'Overdue' : label[i.status]}</td>
                 <td data-label="Total">{money(i.total)}</td>
                 <td data-label="Paid">{money(i.amount_paid)}</td>
                 <td className="actcell"><div className="actions">
                   <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':pdf', () => downloadInvoice(org, i.id), 'Preparing the PDF…')}>{on('pdf') ? 'Preparing…' : 'PDF'}</button>
-                  <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':wa', () => whatsappInvoice(org, i.id), 'Preparing the invoice for WhatsApp…')}>{on('wa') ? 'Opening…' : 'WhatsApp'}</button>
-                  <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':email', () => emailInvoice(org, i.id), 'Sending the invoice by email. Please wait…')}>{on('email') ? 'Sending…' : 'Email'}</button>
+                  {i.status !== 'void' && <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':wa', () => whatsappInvoice(org, i.id), 'Preparing the invoice for WhatsApp…')}>{on('wa') ? 'Opening…' : 'WhatsApp'}</button>}
+                  {i.status !== 'void' && <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':email', () => emailInvoice(org, i.id), 'Sending the invoice by email. Please wait…')}>{on('email') ? 'Sending…' : 'Email'}</button>}
                   {i.status === 'draft' && <button className="ghost" disabled={!!working} onClick={() => run(i.id + ':sent', async () => { const { error } = await supabase.from('invoices').update({ status: 'sent' }).eq('id', i.id); if (error) throw error }, 'Updating…')}>{on('sent') ? 'Updating…' : 'Mark as sent'}</button>}
+                  {['draft', 'sent'].includes(i.status) && Number(i.amount_paid) === 0 && <button className="ghost" disabled={!!working} onClick={() => { setVoiding(i); setReason('') }}>Void</button>}
                 </div></td>
               </tr>
             )
@@ -106,13 +160,13 @@ function Builder({ org, clients, onDone, onCancel }) {
     const { data: inv, error } = await supabase.from('invoices')
       .insert({ org_id: org.id, client_id: clientId, issue_date: issue, due_date: due || null, apply_vat: vat, notes: notes || null })
       .select('id').single()
-    if (error) { setErr(error.message); setBusy(false); return }
+    if (error) { setErr(friendly(error)); setBusy(false); return }
     const { error: e2 } = await supabase.from('invoice_items').insert(
       lines.map((it, i) => ({
         org_id: org.id, invoice_id: inv.id, description: it.description.trim(),
         quantity: Number(it.quantity), unit_price: Number(it.unit_price), position: i,
       })))
-    if (e2) { await supabase.from('invoices').delete().eq('id', inv.id); setErr(e2.message); setBusy(false); return }
+    if (e2) { await supabase.from('invoices').delete().eq('id', inv.id); setErr(friendly(e2)); setBusy(false); return }
     onDone()
   }
 

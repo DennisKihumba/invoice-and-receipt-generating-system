@@ -1,11 +1,15 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import Auth from './Auth'
+import ResetPassword from './ResetPassword'
 import CreateCompany from './CreateCompany'
 import Clients from './Clients'
+import { peek, store, clearCache } from './cache'
+import { warmPdf } from './pdf'
 import Invoices from './Invoices'
 import Payments from './Payments'
 import Settings from './Settings'
+import Team from './Team'
 
 function Logo({ org }) {
   if (org.logo_url) return <img className="logo" src={org.logo_url} alt={org.name} />
@@ -18,35 +22,61 @@ export default function App() {
   const [orgs, setOrgs] = useState(null)      // companies this login belongs to
   const [activeId, setActiveId] = useState(null)
   const [tab, setTab] = useState('clients')
+  const uidRef = useRef(null)
+  const [recovering, setRecovering] = useState(false)   // true while choosing a new password
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+      setSession(s)
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
   // The login decides the company: RLS only returns this user's memberships.
   const loadOrgs = useCallback(async () => {
+    // Only MY membership rows: members can see everyone's rows in their company, and without this
+    // filter the owner's row could be picked as mine, giving staff the owner's tabs.
+    const { data: s } = await supabase.auth.getSession()
+    const uid = s.session?.user?.id
+    if (!uid) return
     const { data, error } = await supabase
       .from('members')
       .select('role, organizations(id, name, logo_url, invoice_prefix, receipt_prefix, vat_rate)')
+      .eq('user_id', uid)
     if (error) return console.error(error)
     const list = data.map(m => ({ ...m.organizations, role: m.role }))
     setOrgs(list)
-    setActiveId(prev => prev ?? list[0]?.id ?? null)
+    if (uidRef.current) store('orgs2:' + uidRef.current, list)
+    setActiveId(prev => (prev && list.some(o => o.id === prev) ? prev : list[0]?.id ?? null))
   }, [])
 
   useEffect(() => {
-    if (session) loadOrgs()
-    else { setOrgs(null); setActiveId(null) }
+    uidRef.current = session?.user?.id ?? null
+    if (session) {
+      // Open instantly with the last known company, then refresh it in the background
+      const cached = peek('orgs2:' + session.user.id)
+      if (cached) { setOrgs(cached); setActiveId(prev => prev ?? cached[0]?.id ?? null) }
+      loadOrgs()
+      // Download the PDF tools quietly so the first PDF / WhatsApp / Email is instant
+      if ('requestIdleCallback' in window) requestIdleCallback(warmPdf, { timeout: 3000 })
+      else setTimeout(warmPdf, 1500)
+    } else if (session === null) {
+      setOrgs(null); setActiveId(null); clearCache()   // signed out: leave nothing behind
+    }
   }, [session, loadOrgs])
 
   if (session === undefined) return <p className="center muted">Loading…</p>
+  // New team members arrive with a temporary password and must choose their own
+  const mustChange = session?.user?.user_metadata?.must_change_password === true
+  if ((recovering || mustChange) && session) return <ResetPassword first={mustChange && !recovering} onDone={() => setRecovering(false)} />
   if (!session) return <Auth />
   if (orgs === null) return <p className="center muted">Loading your company…</p>
   if (orgs.length === 0) return <CreateCompany onCreated={loadOrgs} />
 
   const org = orgs.find(o => o.id === activeId) ?? orgs[0]
+  const canManage = ['owner', 'admin'].includes(org.role)   // only they may change company settings
 
   return (
     <div className="shell">
@@ -63,16 +93,19 @@ export default function App() {
           <button className={tab === 'clients' ? 'on' : ''} onClick={() => setTab('clients')}>Clients</button>
           <button className={tab === 'invoices' ? 'on' : ''} onClick={() => setTab('invoices')}>Invoices</button>
           <button className={tab === 'payments' ? 'on' : ''} onClick={() => setTab('payments')}>Payments</button>
-          <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Settings</button>
+          {canManage && <button className={tab === 'team' ? 'on' : ''} onClick={() => setTab('team')}>Team</button>}
+          {canManage && <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Settings</button>}
         </nav>
-        <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
+        <button className="ghost" onClick={() => { clearCache(); supabase.auth.signOut() }}>Sign out</button>
       </header>
 
       <main>
         {tab === 'clients' && <Clients org={org} />}
         {tab === 'invoices' && <Invoices org={org} />}
         {tab === 'payments' && <Payments org={org} />}
-        {tab === 'settings' && <Settings org={org} onSaved={loadOrgs} />}
+        {tab === 'team' && canManage && <Team org={org} />}
+        {tab === 'settings' && canManage && <Settings org={org} onSaved={loadOrgs} />}
+        {tab === 'settings' && !canManage && <p className="muted">Only owners and admins can change company settings.</p>}
       </main>
     </div>
   )
