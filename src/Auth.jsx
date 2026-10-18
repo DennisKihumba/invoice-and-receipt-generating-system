@@ -12,8 +12,8 @@ const readGuard = () => { try { return JSON.parse(localStorage.getItem(KEY)) ?? 
 const writeGuard = g => { try { localStorage.setItem(KEY, JSON.stringify(g)) } catch { /* ignore */ } }
 const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
-export default function Auth() {
-  const [mode, setMode] = useState('login')            // 'login' | 'signup' | 'forgot'
+export default function Auth({ initialMode = 'login', onBack }) {
+  const [mode, setMode] = useState(initialMode)    // 'login' | 'signup' | 'forgot'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [msg, setMsg] = useState('')
@@ -91,6 +91,7 @@ export default function Auth() {
   const forgot = mode === 'forgot'
   return (
     <div className="card narrow">
+      {onBack && <p style={{ marginTop: 0 }}><a href="#" onClick={e => { e.preventDefault(); onBack() }}>Back to home</a></p>}
       <h1>{forgot ? 'Reset your password' : mode === 'login' ? 'Log in' : 'Create your account'}</h1>
       {forgot && <p className="muted">Enter your email and we will send you a link to choose a new password.</p>}
       <form onSubmit={forgot ? sendReset : submit}>

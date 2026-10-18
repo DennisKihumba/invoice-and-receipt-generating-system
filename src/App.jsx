@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import Auth from './Auth'
+import Landing from './Landing'
 import ResetPassword from './ResetPassword'
 import CreateCompany from './CreateCompany'
 import Clients from './Clients'
@@ -23,6 +24,9 @@ export default function App() {
   const [activeId, setActiveId] = useState(null)
   const [tab, setTab] = useState('clients')
   const uidRef = useRef(null)
+  // Visitors who are not logged in see the landing page first; 'login' / 'signup' opens the form.
+  // A link with an error in it (an expired reset link) goes straight to the form, which explains it.
+  const [entry, setEntry] = useState(() => (window.location.hash.includes('error=') ? 'login' : null))
   const [recovering, setRecovering] = useState(false)   // true while choosing a new password
 
   useEffect(() => {
@@ -71,7 +75,11 @@ export default function App() {
   // New team members arrive with a temporary password and must choose their own
   const mustChange = session?.user?.user_metadata?.must_change_password === true
   if ((recovering || mustChange) && session) return <ResetPassword first={mustChange && !recovering} onDone={() => setRecovering(false)} />
-  if (!session) return <Auth />
+  if (!session) {
+    return entry
+      ? <Auth initialMode={entry} onBack={() => setEntry(null)} />
+      : <Landing onLogin={() => setEntry('login')} onSignup={() => setEntry('signup')} />
+  }
   if (orgs === null) return <p className="center muted">Loading your company…</p>
   if (orgs.length === 0) return <CreateCompany onCreated={loadOrgs} />
 
@@ -96,7 +104,7 @@ export default function App() {
           {canManage && <button className={tab === 'team' ? 'on' : ''} onClick={() => setTab('team')}>Team</button>}
           {canManage && <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Settings</button>}
         </nav>
-        <button className="ghost" onClick={() => { clearCache(); supabase.auth.signOut() }}>Sign out</button>
+        <button className="ghost" onClick={() => { clearCache(); setEntry(null); supabase.auth.signOut() }}>Sign out</button>
       </header>
 
       <main>
