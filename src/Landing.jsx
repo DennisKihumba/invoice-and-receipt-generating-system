@@ -45,13 +45,13 @@ export default function Landing({ onLogin, onSignup }) {
   return (
     <div className="lp">
       <header className="lp-nav">
-        <a className="lp-brand" href="#top" aria-label="Cancelo Invoicing">
+        <a className="lp-brand" href="#top" aria-label="Cancelo Invoicing system">
           <span className="lp-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M7 3h8l4 4v14H7z" /><path d="m10 14 2 2 4-4" />
             </svg>
           </span>
-          Cancelo Invoicing
+          Cancelo Invoicing system
         </a>
         <nav className="lp-nav-actions" aria-label="Account">
           <button className="lp-link" onClick={onLogin}>Log in</button>
@@ -64,7 +64,7 @@ export default function Landing({ onLogin, onSignup }) {
           <div className="lp-hero-text">
             <h1 className="lp-h1">Invoice, get paid, and the receipt writes itself.</h1>
             <p className="lp-lead">
-              Cancelo Invoicing is an invoice and receipt system for businesses of every size, for investors
+              Cancelo Invoicing system is an invoice and receipt system for businesses of every size, for investors
               running ventures, and for individuals taking on contracts.
             </p>
             <div className="lp-cta">
@@ -79,7 +79,7 @@ export default function Landing({ onLogin, onSignup }) {
               <p className="lp-doc-title">Receipt</p>
               <p className="lp-mono">RCT-2026-0007</p>
               <dl className="lp-mono lp-lines">
-                <div><dt>From</dt><dd>Njeri Hardware</dd></div>
+                <div><dt>From</dt><dd>kenya laptop dealers Hardware</dd></div>
                 <div><dt>Invoice</dt><dd>INV-2026-0012</dd></div>
                 <div><dt>M-Pesa</dt><dd>QJ82K4L9TA</dd></div>
                 <div><dt>Received</dt><dd>53,360.00</dd></div>
@@ -92,15 +92,15 @@ export default function Landing({ onLogin, onSignup }) {
               <div className="lp-doc-head">
                 <span className="lp-mark lp-mark-sm">BW</span>
                 <div>
-                  <p className="lp-doc-biz">Baraka Web Studio</p>
-                  <p className="lp-doc-small">Mombasa, Kenya</p>
+                  <p className="lp-doc-biz">Alfred Web Studio</p>
+                  <p className="lp-doc-small">Nairobi, Kenya</p>
                 </div>
                 <div className="lp-doc-id">
                   <p className="lp-doc-title">Invoice</p>
                   <p className="lp-doc-small">INV-2026-0012</p>
                 </div>
               </div>
-              <p className="lp-doc-small lp-bill">Bill to <strong>Njeri Hardware</strong></p>
+              <p className="lp-doc-small lp-bill">Bill to <strong>kenya laptop dealers Hardware</strong></p>
               <table className="lp-items">
                 <tbody>
                   <tr><td>Website design</td><td>40,000.00</td></tr>
@@ -167,7 +167,7 @@ export default function Landing({ onLogin, onSignup }) {
       </main>
 
       <footer className="lp-footer">
-        <p>Cancelo Invoicing is a product of Cancelo IT Software Engineering Company, Kenya. &copy; {new Date().getFullYear()}</p>
+        <p>Cancelo Invoicing system is a product of Cancelo IT Software Engineering Company, Kenya. &copy; {new Date().getFullYear()}</p>
         <button className="lp-link" onClick={onLogin}>Log in</button>
       </footer>
     </div>
