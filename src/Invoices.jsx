@@ -28,7 +28,7 @@ export default function Invoices({ org }) {
     ])
     if (inv.error || cl.error || pay.error) throw (inv.error || cl.error || pay.error)
     return { invoices: inv.data, clients: cl.data, collected: pay.data.reduce((s, p) => s + Number(p.amount), 0) }
-  })
+  }, ['invoices', 'payments', 'clients'])
   const ready = data !== undefined
   const invoices = data?.invoices ?? []
   const clients = data?.clients ?? []

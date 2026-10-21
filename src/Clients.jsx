@@ -12,7 +12,7 @@ export default function Clients({ org }) {
       .from('clients').select('*').eq('org_id', org.id).order('created_at', { ascending: false })
     if (error) throw error
     return data
-  })
+  }, ['clients'])
   const clients = list ?? []
 
   async function add(e) {

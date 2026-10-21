@@ -34,7 +34,7 @@ export default function Payments({ org }) {
     ])
     if (inv.error || rec.error) throw (inv.error || rec.error)
     return { open: inv.data, receipts: rec.data }
-  })
+  }, ['invoices', 'payments', 'receipts'])
   const ready = data !== undefined
   const open = data?.open ?? []
   const receipts = data?.receipts ?? []

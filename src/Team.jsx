@@ -15,7 +15,7 @@ export default function Team({ org }) {
     const { data, error } = await supabase.rpc('list_team', { p_org: org.id })
     if (error) throw error
     return data
-  })
+  }, ['members'])
   const team = data ?? []
   const [f, setF] = useState({ name: '', email: '', role: 'staff', password: '' })
   const [err, setErr] = useState('')

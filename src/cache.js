@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { friendly } from './errors'
+import { onChange } from './live'
 
 // Show saved data instantly, then refresh from the server and update the screen
 // (often called "stale-while-revalidate"). Saved in memory and in this browser's
@@ -35,7 +36,9 @@ export function clearCache() {
   } catch { /* ignore */ }
 }
 
-export function useCached(key, fetcher) {
+// `watch` lists the database tables this screen shows; when one of them changes anywhere
+// (another device, another person), the screen refreshes itself.
+export function useCached(key, fetcher, watch = []) {
   const [data, setData] = useState(() => peek(key))
   const [error, setError] = useState('')
   const fetchRef = useRef(fetcher)
@@ -49,5 +52,11 @@ export function useCached(key, fetcher) {
   }, [key])
 
   useEffect(() => { setData(peek(key)); refresh() }, [key, refresh])
+
+  const watching = watch.join(',')
+  useEffect(() => {
+    if (!watching) return
+    return onChange(changed => { if (changed.some(t => watching.split(',').includes(t))) refresh() })
+  }, [watching, refresh])
   return { data, error, refresh }
 }
